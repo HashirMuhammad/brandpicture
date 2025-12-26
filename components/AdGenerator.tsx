@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { AdParameters, GeneratedAd, AspectRatio } from '../types';
+import { AdParameters, GeneratedAd, AspectRatio, ImageSize } from '../types';
 
 const AdGenerator: React.FC = () => {
   const [params, setParams] = useState<AdParameters>({
@@ -51,6 +51,21 @@ const AdGenerator: React.FC = () => {
     setLoadingStep('Crafting your ad creative...');
 
     try {
+      // Determine model based on requested quality
+      // gemini-3-pro-image-preview supports high-quality 2K/4K resolution
+      const usePro = params.imageSize !== '1K';
+      const modelName = usePro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
+
+      // Handle mandatory API key selection for Pro model or if explicitly required
+      if (usePro) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+          await window.aistudio.openSelectKey();
+          // After openSelectKey, proceed assuming selection was successful to avoid race conditions.
+        }
+      }
+
+      // Initialize AI instance right before call to use current API key from process.env.API_KEY
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
       const prompt = `Create a high-impact Meta Ad for the brand "${params.brandName}".
@@ -105,14 +120,15 @@ const AdGenerator: React.FC = () => {
         });
       }
 
-      setLoadingStep('Generating ad visuals with Gemini Flash...');
+      setLoadingStep(`Generating ad visuals with ${usePro ? 'Gemini 3 Pro' : 'Gemini 2.5 Flash'}...`);
       
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: modelName,
         contents: { parts },
         config: {
           imageConfig: {
-            aspectRatio: params.aspectRatio
+            aspectRatio: params.aspectRatio,
+            ...(usePro && { imageSize: params.imageSize })
           }
         }
       });
@@ -121,9 +137,11 @@ const AdGenerator: React.FC = () => {
       if (response.candidates && response.candidates.length > 0) {
         const candidate = response.candidates[0];
         if (candidate.content && candidate.content.parts) {
+          // Iterate through parts to find the image part
           for (const part of candidate.content.parts) {
             if (part.inlineData) {
-              imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+              const base64EncodeString: string = part.inlineData.data;
+              imageUrl = `data:image/png;base64,${base64EncodeString}`;
               break;
             }
           }
@@ -141,7 +159,13 @@ const AdGenerator: React.FC = () => {
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Ad generation failed. Please check your internet connection and try again.');
+      // Handle key selection error and prompt user to select a key again
+      if (err.message?.includes('Requested entity was not found.')) {
+        setError('API Key error. Please re-select your API key.');
+        await window.aistudio.openSelectKey();
+      } else {
+        setError(err.message || 'Ad generation failed. Please check your internet connection and try again.');
+      }
     } finally {
       setIsGenerating(false);
       setLoadingStep('');
@@ -290,16 +314,31 @@ const AdGenerator: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-2">
-               <select
-                value={params.aspectRatio}
-                onChange={e => setParams(p => ({ ...p, aspectRatio: e.target.value as AspectRatio }))}
-                className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 outline-none text-[10px] font-black uppercase tracking-widest appearance-none cursor-pointer hover:bg-white transition-colors"
-              >
-                <option value="1:1">Square (Post)</option>
-                <option value="9:16">Portrait (Story)</option>
-                <option value="16:9">Landscape (Banner)</option>
-              </select>
+            <div className="grid grid-cols-2 gap-4 pt-2">
+               <div>
+                 <label className="text-[8px] font-black text-gray-400 uppercase tracking-widest block mb-1 ml-2">Aspect Ratio</label>
+                 <select
+                  value={params.aspectRatio}
+                  onChange={e => setParams(p => ({ ...p, aspectRatio: e.target.value as AspectRatio }))}
+                  className="w-full px-4 py-3 rounded-2xl border border-gray-100 bg-gray-50 outline-none text-[9px] font-black uppercase tracking-widest appearance-none cursor-pointer hover:bg-white transition-colors"
+                >
+                  <option value="1:1">Square (Post)</option>
+                  <option value="9:16">Portrait (Story)</option>
+                  <option value="16:9">Landscape (Banner)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[8px] font-black text-gray-400 uppercase tracking-widest block mb-1 ml-2">Resolution</label>
+                <select
+                  value={params.imageSize}
+                  onChange={e => setParams(p => ({ ...p, imageSize: e.target.value as ImageSize }))}
+                  className="w-full px-4 py-3 rounded-2xl border border-gray-100 bg-gray-50 outline-none text-[9px] font-black uppercase tracking-widest appearance-none cursor-pointer hover:bg-white transition-colors"
+                >
+                  <option value="1K">1K (Standard)</option>
+                  <option value="2K">2K (High Res)</option>
+                  <option value="4K">4K (Premium)</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -317,6 +356,19 @@ const AdGenerator: React.FC = () => {
               'Create My Ad'
             )}
           </button>
+
+          {params.imageSize !== '1K' && (
+            <div className="mt-4 text-center">
+              <a 
+                href="https://ai.google.dev/gemini-api/docs/billing" 
+                target="_blank" 
+                rel="noreferrer"
+                className="text-[8px] font-black text-blue-500 hover:underline uppercase tracking-widest"
+              >
+                Billing Info for High-Res
+              </a>
+            </div>
+          )}
 
           {error && (
             <div className="mt-6 p-4 bg-red-50 text-red-600 rounded-2xl text-[10px] border border-red-100 flex items-start gap-3">
@@ -358,7 +410,9 @@ const AdGenerator: React.FC = () => {
                     <i className="fas fa-magic text-4xl text-orange-600 animate-pulse"></i>
                   </div>
                 </div>
-                <h3 className="text-3xl font-black text-gray-900 mb-4 tracking-tighter uppercase italic">Gemini Flash AI</h3>
+                <h3 className="text-3xl font-black text-gray-900 mb-4 tracking-tighter uppercase italic">
+                  {params.imageSize === '1K' ? 'Gemini Flash AI' : 'Gemini Pro AI'}
+                </h3>
                 <p className="text-gray-400 text-[10px] font-black uppercase tracking-[0.4em]">{loadingStep}</p>
               </div>
             ) : ad ? (

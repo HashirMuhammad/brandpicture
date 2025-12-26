@@ -33,9 +33,9 @@ declare global {
 
   interface Window {
     /**
-     * Declared without the readonly modifier to match existing global object definitions
+     * Declared with the readonly modifier to match existing global object definitions
      * and avoid 'identical modifiers' errors during interface merging.
      */
-    aistudio: AIStudio;
+    readonly aistudio: AIStudio;
   }
 }
