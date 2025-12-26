@@ -1,0 +1,7 @@
+{
+  "name": "Meta Ad Creator Pro",
+  "description": "Generate high-converting Meta Ads for your products using Gemini 3 Pro Vision and Image generation. Turn simple product photos into professional lifestyle advertisements with pricing and custom slogans.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
